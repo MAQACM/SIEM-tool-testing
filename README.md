@@ -104,22 +104,47 @@ python3 03_wazuh_alert_extractor.py --start "$BENIGN_START_ISO" --out wazuh_beni
 ```
 
 ### 1.5 Condition B — attacks per load tier (§10.2, §10.4)
-Repeat for each tier (50 → 250 → 1000 EPS). Example for Tier 1:
+Repeat for each tier (50 → 250 → 1000 EPS). Example for Tier 1 (lab IPs: Ubuntu
+`192.168.1.67`, Windows `192.168.1.70`, Kali `192.168.1.68` — use your own).
+
+**a) Clean up any partial/aborted run first.** `02_metrics_logger.py` and
+`09_attack_runner.sh` both *append*, so stale files corrupt the new run:
 ```bash
-# VPS: start metrics, record window start
+# VPS:
+rm -f ~/siem_exp/wazuh_tier1_attacks.csv
+# Kali:
+rm -f ~/Downloads/SIEM-tool-testing-ft-test/ground_truth_wazuh_tier1.csv
+# Ubuntu victim: make sure no old generator is still running
+sudo pkill -f 08_event_generator.py
+```
+
+**b) Start the three pieces in order.**
+```bash
+# VPS — start metrics + record the window start (KEEP THIS SHELL OPEN):
+cd ~/siem_exp
 ATTACK_START=$(date +%s); START_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 python3 02_metrics_logger.py --out wazuh_tier1_attacks.csv &
 
-# victim VM: background load at the tier's EPS
-python3 08_event_generator.py --eps 50 --duration 900 &
+# Ubuntu victim — background load at the tier's EPS (stops itself after --duration):
+sudo python3 08_event_generator.py --eps 50 --duration 900 &
 
-# Kali: run the attack matrix (writes ground truth)
-./09_attack_runner.sh --linux <UBUNTU_IP> --windows <WIN_IP> \
-    --web http://<UBUNTU_IP>:8080 --gt ground_truth_wazuh_tier1.csv
+# Kali — run the attack matrix (writes ground truth):
+./09_attack_runner.sh --linux 192.168.1.67 --windows 192.168.1.70 \
+    --web http://192.168.1.67:8080 --gt ground_truth_wazuh_tier1.csv
 ```
-Stop the metrics logger (Ctrl+C / `kill %1`) once the matrix finishes.
-Scope note: `09_attack_runner.sh` targets your **own lab VMs only**; DDoS vectors are
-count-bounded. Never point it at the VPS or any host you don't own.
+
+**c) When the matrix finishes,** stop the logger on the VPS:
+```bash
+kill %1          # stops 02_metrics_logger (it runs in the background, so Ctrl+C won't reach it)
+```
+
+Notes:
+- `ATTACK_START`/`START_ISO` live only in that VPS shell — keep it open through 1.6.
+- The generator must outlast the attacks; raise `--duration` if the matrix runs longer than 15 min.
+- The generator runs in the background: stop it early with `sudo pkill -f 08_event_generator.py`, not Ctrl+C.
+- If a victim has no web app on :8080, skip web vectors: add `--only sys,malware,brute,ddos`.
+- Pass `--ssh-user <name>` if the victim login isn't `mark`.
+- Scope: `09_attack_runner.sh` targets your **own lab VMs only**; DDoS vectors are count-bounded. Never point it at the VPS or any host you don't own.
 
 ### 1.6 Extract + score (VPS or Mac)
 ```bash
