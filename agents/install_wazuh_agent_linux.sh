@@ -28,11 +28,16 @@ echo "[*] Installing Wazuh agent -> manager $MANAGER as '$AGENT_NAME'..."
 sudo WAZUH_MANAGER="$MANAGER" WAZUH_AGENT_NAME="$AGENT_NAME" \
   apt-get install -y wazuh-agent="$WAZUH_VERSION"
 
-# Tail the synthetic EPS log so load-tier events reach the SIEM.
-echo "[*] Adding synthetic event file + FIM directory to agent config..."
+# Tail the synthetic EPS log so load-tier events reach the SIEM, and monitor the
+# attack runner's FIM target under the real (non-root) user's home (Option B).
+FIM_USER="${SUDO_USER:-$USER}"
+FIM_HOME="$(eval echo "~${FIM_USER}")"
+FIM_DIR="${FIM_HOME}/fimtest"
+echo "[*] Adding synthetic event file + FIM directory ($FIM_DIR) to agent config..."
 sudo mkdir -p /var/log/siem_synthetic
+sudo -u "$FIM_USER" mkdir -p "$FIM_DIR"
 if ! grep -q siem_synthetic /var/ossec/etc/ossec.conf; then
-  sudo sed -i 's#</ossec_config>#  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/siem_synthetic/events.log</location>\n  </localfile>\n  <syscheck>\n    <directories check_all="yes" realtime="yes">/root/fimtest</directories>\n    <directories check_all="yes" realtime="yes">/root</directories>\n  </syscheck>\n</ossec_config>#' /var/ossec/etc/ossec.conf
+  sudo sed -i "s#</ossec_config>#  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/siem_synthetic/events.log</location>\n  </localfile>\n  <syscheck>\n    <directories check_all=\"yes\" realtime=\"yes\">${FIM_DIR}</directories>\n  </syscheck>\n</ossec_config>#" /var/ossec/etc/ossec.conf
 fi
 
 sudo systemctl daemon-reload

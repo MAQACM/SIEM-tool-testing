@@ -21,6 +21,7 @@ set -uo pipefail
 
 LINUX=""; WINDOWS=""; WEB=""; GT="ground_truth.csv"; ONLY="all"; DRY=0
 USERLIST="users.txt"; PASSLIST="passwords.txt"
+SSH_USER="${SSH_USER:-mark}"   # non-root login for the Linux FIM/EICAR steps (Option B)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,12 +32,14 @@ while [ $# -gt 0 ]; do
     --only)    ONLY="$2"; shift 2;;        # comma list: sys,malware,brute,web,ddos
     --userlist) USERLIST="$2"; shift 2;;
     --passlist) PASSLIST="$2"; shift 2;;
+    --ssh-user) SSH_USER="$2"; shift 2;;   # victim SSH user for FIM steps (default: mark)
     --dry-run) DRY=1; shift;;
     *) echo "Unknown arg: $1"; exit 1;;
   esac
 done
 
 [ -z "$LINUX" ] && { echo "[!] --linux <victim ip> is required"; exit 1; }
+FIM_DIR="/home/${SSH_USER}/fimtest"   # monitored dir the Wazuh agent watches (see agents/ installer)
 
 # --- ground-truth logging ----------------------------------------------------
 if [ ! -f "$GT" ]; then
@@ -76,11 +79,11 @@ fi
 # --- 2. Malware / FIM: ransomware sim + file modification (T1486 / T1204.002)-
 # These are ENDPOINT actions -> executed ON the victim over SSH so its agent logs them.
 if want malware; then
-  echo "[*] Malware / FIM attacks (T1486 / T1204.002)  -- executed on victim via SSH"
-  log_gt "EICAR malicious file drop" "Malware" "T1204.002" "EICAR" "$LINUX" "writes EICAR test string to monitored dir"
-  fire "ssh ${SSH_USER:-root}@$LINUX 'printf %s \"X5O!P%@AP[4\\\\\\\\PZX54(P^)7CC)7}\\\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\\\$H+H*\" > /root/eicar.com'"
+  echo "[*] Malware / FIM attacks (T1486 / T1204.002)  -- executed on victim via SSH as $SSH_USER"
+  log_gt "EICAR malicious file drop" "Malware" "T1204.002" "EICAR" "$LINUX" "writes EICAR test string to monitored dir $FIM_DIR"
+  fire "ssh ${SSH_USER}@$LINUX 'mkdir -p $FIM_DIR && printf %s \"X5O!P%@AP[4\\\\\\\\PZX54(P^)7CC)7}\\\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\\\$H+H*\" > $FIM_DIR/eicar.com'"
   log_gt "Ransomware-style mass file rewrite" "Malware" "T1486" "FIM script" "$LINUX" "rapidly rewrites files in monitored dir to trigger FIM"
-  fire "ssh ${SSH_USER:-root}@$LINUX 'mkdir -p /root/fimtest && for i in \$(seq 1 50); do echo ENCRYPTED_\$RANDOM > /root/fimtest/file_\$i.locked; done'"
+  fire "ssh ${SSH_USER}@$LINUX 'mkdir -p $FIM_DIR && for i in \$(seq 1 50); do echo ENCRYPTED_\$RANDOM > $FIM_DIR/file_\$i.locked; done'"
 fi
 
 # --- 3. Brute force: SSH / RDP / DB  (T1110.001 / T1110.003) ------------------
